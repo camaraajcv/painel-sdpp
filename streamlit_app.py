@@ -296,12 +296,20 @@ st.dataframe(tab_show, use_container_width=True, height=560)
 # =========================
 # Diagnóstico opcional
 # =========================
+# =========================
+# Diagnóstico opcional
+# =========================
 if debug:
     st.divider()
     st.subheader("Diagnóstico")
-    st.write("UGR(s) vinculadas:", uগ্রs_vinculadas if False else ugs_vinculadas)  # mantém compatível sem erro
+
+    st.write("UG Executora selecionada:", ug_sel_str)
+    st.write("UGR(s) vinculadas:", ugrs_vinculadas)
+
     st.write("Linhas pool LOA:", len(df_loa_pool))
-    st.write("Linhas LOA usadas:", len(df_loa))
+    st.write("Linhas LOA usadas (após filtro por UGR):", len(df_loa))
     st.write("Linhas UG filtrada:", len(df_ug))
+
     st.write("KPI Dotação (float):", dotacao_loa)
-    st.write("KPI Créditos recebidos (float):", creditos_recebidos)
+    st.write("KPI Créditos Recebidos (float):", creditos_recebidos)
+
