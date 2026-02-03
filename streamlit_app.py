@@ -4,7 +4,7 @@ import requests
 import pandas as pd
 import streamlit as st
 
-st.title("TESTE — Leitura CSV (corrigido)")
+st.title("TESTE — Leitura CSV Google Drive (robusta)")
 
 FILE_ID = "1s-lIrHxMZMRnCOayQeQ5ML0LpLbVTRNy"
 URL = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
@@ -18,41 +18,47 @@ def baixar_drive(url: str) -> bytes:
 def decode_cp1252(data: bytes) -> str:
     return data.decode("cp1252", errors="replace")
 
-def limpar_linhas_iniciais(text: str) -> str:
-    # remove quaisquer linhas iniciais que não pareçam parte do CSV
+def tratar_texto(text: str) -> str:
     lines = text.splitlines()
-    # acha a primeira linha "de verdade" (normalmente começa com aspas)
+
+    # remove linhas iniciais "lixo" até achar uma linha que comece com aspas (cabeçalho)
     start = 0
     for i, ln in enumerate(lines):
         if ln.strip().startswith('"'):
             start = i
             break
     lines = lines[start:]
-    # aplica sua regra: remove 1ª linha e 2 últimas
+
+    # aplica sua regra: remove 1ª e as 2 últimas
     if len(lines) < 4:
-        raise ValueError(f"Poucas linhas após limpeza ({len(lines)})")
+        raise ValueError("Poucas linhas para aplicar o corte.")
     lines = lines[1:-2]
     return "\n".join(lines)
 
 if st.button("Baixar e ler"):
     data = baixar_drive(URL)
-    st.write("Bytes:", len(data))
-    st.code(data[:200].decode("cp1252", errors="replace"))
-
     text = decode_cp1252(data)
-    treated = limpar_linhas_iniciais(text)
+    treated = tratar_texto(text)
 
-    # leitura robusta de CSV com vírgula e aspas
+    # leitura robusta: pula linhas ruins
     df = pd.read_csv(
         io.StringIO(treated),
         sep=",",
-        header=0,
-        dtype=str,
-        engine="python",
         quotechar='"',
+        engine="python",
+        dtype=str,
+        on_bad_lines="skip",
         skipinitialspace=True,
     )
 
+    # remove colunas vazias/unnamed
+    df.columns = [re.sub(r"\s+", " ", str(c)).strip() for c in df.columns]
+    df = df.loc[:, ~df.columns.str.match(r"^Unnamed", case=False)]
+    df = df.dropna(axis=1, how="all")
+
     st.success(f"OK: {df.shape[0]} linhas × {df.shape[1]} colunas")
     st.write("Colunas:", list(df.columns))
-    st.dataframe(df.head(20), use_container_width=True)
+    st.dataframe(df.head(30), use_container_width=True)
+
+    # diagnóstico: quantas linhas foram puladas (aprox)
+    st.caption("Obs.: linhas 'quebradas' foram ignoradas (on_bad_lines='skip').")
