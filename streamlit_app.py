@@ -126,7 +126,7 @@ def ler_excel_tratado(data: bytes) -> pd.DataFrame:
 # UI
 # =========================
 st.title("📊 Painel de Gastos — Leitura diária do OneDrive")
-url = "https://onedrive.live.com/edit?cid=79e2ea2aaf97ea6b&id=79E2EA2AAF97EA6B!s69abd6e991b14e84af28cb23a5f2569c&resid=79E2EA2AAF97EA6B!s69abd6e991b14e84af28cb23a5f2569c&ithint=file%2Cxlsx&embed=1&migratedtospo=true&redeem=aHR0cHM6Ly8xZHJ2Lm1zL3gvYy83OWUyZWEyYWFmOTdlYTZiL0lRVHAxcXRwc1pHRVRxOG95eU9sOGxhY0Fma3dhZTlBM3IxZEZIeVk3Nm1FLTZN&wdo=2"
+url = "https://1drv.ms/x/c/79e2ea2aaf97ea6b/IQDp1qtpsZGETq8oyyOl8lacAYtMfzw3hr9M5F-mEYGVKv4?e=jICJ9i"
 
 try:
     data = baixar_onedrive(url)
@@ -143,7 +143,7 @@ with st.sidebar:
 
     fonte = st.radio("Escolha a fonte", ["OneDrive (URL)", "Arquivo local (caminho)", "Upload (manual)"], index=0)
 
-    url_default = "https://onedrive.live.com/edit?cid=79e2ea2aaf97ea6b&id=79E2EA2AAF97EA6B!s69abd6e991b14e84af28cb23a5f2569c&resid=79E2EA2AAF97EA6B!s69abd6e991b14e84af28cb23a5f2569c&ithint=file%2Cxlsx&embed=1&migratedtospo=true&redeem=aHR0cHM6Ly8xZHJ2Lm1zL3gvYy83OWUyZWEyYWFmOTdlYTZiL0lRVHAxcXRwc1pHRVRxOG95eU9sOGxhY0Fma3dhZTlBM3IxZEZIeVk3Nm1FLTZN&wdo=2"
+    url_default = "https://1drv.ms/x/c/79e2ea2aaf97ea6b/IQDp1qtpsZGETq8oyyOl8lacAYtMfzw3hr9M5F-mEYGVKv4?e=jICJ9i"
     url = st.text_input("Link do OneDrive", value=url_default) if fonte == "OneDrive (URL)" else ""
 
     path = st.text_input(
