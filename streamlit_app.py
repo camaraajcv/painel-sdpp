@@ -62,7 +62,7 @@ def carregar_df():
         skipinitialspace=True
     )
 
-    # ✅ SUA REGRA: excluir as 2 primeiras linhas do DF gerado
+    # ✅ excluir as 2 primeiras linhas do DF gerado (células mescladas)
     df = df.iloc[2:].reset_index(drop=True)
 
     # limpar colunas vazias/Unnamed
@@ -70,6 +70,15 @@ def carregar_df():
     df = df.dropna(axis=1, how="all")
 
     df = normalize_cols(df)
+
+    # ✅ renomear colunas numéricas
+    df = df.rename(columns={
+        "13": "DOTACAO_ATUALIZADA",
+        "19": "CREDITO_DISPONIVEL",
+        "30": "EMPENHADAS_A_LIQUIDAR",
+        "32": "LIQUIDADAS_A_PAGAR",
+        "34": "PAGAS",
+    })
 
     return df
 
@@ -93,20 +102,20 @@ st.success(f"Arquivo carregado: {df.shape[0]} linhas × {df.shape[1]} colunas")
 # Localizar colunas importantes
 # =========================
 COL_UG   = find_col(df, "ug executora", "ug execut", "ug", "unidade gestora")
-COL_DOT  = find_col(df, "dotacao atualizada", "dotação atualizada")
+COL_DOT  = find_col(df, "dotacao atualizada", "dotação atualizada", "dotacao_atualizada")
 
-COL_CRED = find_col(df, "credito disponivel", "crédito disponível")
-COL_ALIQ = find_col(df, "empenhos a liquidar", "a liquidar")
-COL_LIQP = find_col(df, "empenhos liquidados a pagar", "liquidados a pagar")
-COL_PAGO = find_col(df, "empenhos pagos", "pagos")
+COL_CRED = find_col(df, "credito disponivel", "crédito disponível", "credito_disponivel")
+COL_ALIQ = find_col(df, "empenhadas_a_liquidar", "empenhos a liquidar", "a liquidar")
+COL_LIQP = find_col(df, "liquidadas_a_pagar", "liquidados a pagar", "liquidadas a pagar")
+COL_PAGO = find_col(df, "pagas", "empenhos pagos", "pagos")
 
 missing = [n for n,c in [
     ("UG Executora", COL_UG),
     ("Dotação atualizada", COL_DOT),
     ("Crédito disponível", COL_CRED),
-    ("Empenhos a liquidar", COL_ALIQ),
-    ("Empenhos liquidados a pagar", COL_LIQP),
-    ("Empenhos pagos", COL_PAGO),
+    ("Empenhadas a liquidar", COL_ALIQ),
+    ("Liquidadas a pagar", COL_LIQP),
+    ("Pagas", COL_PAGO),
 ] if c is None]
 
 if missing:
@@ -133,7 +142,7 @@ if not ug_sel:
 df_ug = df[df[COL_UG].astype(str) == str(ug_sel)].copy()
 
 # =========================
-# Métricas
+# Métricas (regra que você passou)
 # =========================
 dotacao_loa = df_ug[COL_DOT].sum(skipna=True)
 
@@ -152,9 +161,9 @@ st.subheader(f"📌 Painel — UG Executora: {ug_sel}")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Dotação Atualizada (LOA)", money_brl(dotacao_loa))
 c2.metric("Créditos Recebidos", money_brl(creditos_recebidos))
-c3.metric("Empenhos pagos", money_brl(empenhos_pagos))
-c4.metric("Saldo", money_brl(saldo))
+c3.metric("Despesas pagas (controle empenho)", money_brl(empenhos_pagos))
+c4.metric("Saldo (Recebidos - Pagos)", money_brl(saldo))
 
 st.divider()
 st.subheader("Dados filtrados")
-st.dataframe(df_ug, use_container_width=True, height=500)
+st.dataframe(df_ug, use_container_width=True, height=520)
