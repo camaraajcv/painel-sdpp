@@ -13,29 +13,48 @@ st.set_page_config(page_title="Painel de Gastos — Google Drive", layout="wide"
 FILE_ID = "1s-lIrHxMZMRnCOayQeQ5ML0LpLbVTRNy"
 URL = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
 
-# UGs onde a LOA/Dotação Atualizada está registrada (pool LOA)
+# Pool LOA (UGs onde a dotação aparece)
 UGS_LOA = {"120002", "121002"}
 
 # =========================
 # Helpers
 # =========================
+def _to_float(x) -> float:
+    try:
+        if x is None:
+            return 0.0
+        if isinstance(x, (int, float, np.integer, np.floating)):
+            return float(x) if not np.isnan(x) else 0.0
+        return float(x)
+    except Exception:
+        return 0.0
+
 def br_compact(x: float) -> str:
-    """Formato curto: R$ 1,23 bi / mi / mil"""
-    if x is None or (isinstance(x, float) and np.isnan(x)):
-        return "R$ 0"
+    """
+    Formato curto BR:
+      R$ 1,23 bi | R$ 450,80 mi | R$ 12,34 mil | R$ 980
+    """
+    x = _to_float(x)
     absx = abs(x)
+
     if absx >= 1_000_000_000:
-        return "R$ " + f"{x/1_000_000_000:.2f}".replace(".", ",") + " bi"
+        v = x / 1_000_000_000
+        s = f"{v:.2f}".replace(".", ",")
+        return f"R$ {s} bi"
     if absx >= 1_000_000:
-        return "R$ " + f"{x/1_000_000:.2f}".replace(".", ",") + " mi"
+        v = x / 1_000_000
+        s = f"{v:.2f}".replace(".", ",")
+        return f"R$ {s} mi"
     if absx >= 1_000:
-        return "R$ " + f"{x/1_000:.2f}".replace(".", ",") + " mil"
-    return "R$ " + f"{x:.0f}".replace(".", ",")
+        v = x / 1_000
+        s = f"{v:.2f}".replace(".", ",")
+        return f"R$ {s} mil"
+    s = f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {s}"
 
 def money_brl(x: float) -> str:
-    if x is None or (isinstance(x, float) and np.isnan(x)):
-        return "R$ 0,00"
-    return f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    x = _to_float(x)
+    return "R$ " + f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def brl_to_float(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.strip()
@@ -74,23 +93,23 @@ def carregar_df():
         sep=",",
         quotechar='"',
         engine="python",
-        skiprows=1,       # remove a linha "xxxxxxx"
-        skipfooter=2,     # remove as 2 últimas linhas
+        skiprows=1,       # remove linha "xxxxxxx"
+        skipfooter=2,     # remove 2 últimas linhas
         header=0,
         dtype=str,
-        skipinitialspace=True
+        skipinitialspace=True,
     )
 
-    # excluir as 2 primeiras linhas do DF gerado (células mescladas)
+    # remove 2 primeiras linhas do DF gerado (células mescladas)
     df = df.iloc[2:].reset_index(drop=True)
 
-    # limpar colunas vazias/Unnamed
+    # remove colunas vazias/Unnamed
     df = df.loc[:, ~df.columns.astype(str).str.match(r"^Unnamed", case=False)]
     df = df.dropna(axis=1, how="all")
 
     df = normalize_cols(df)
 
-    # renomear colunas numéricas
+    # renomear colunas numéricas (nomes "13","19","30","32","34")
     df = df.rename(columns={
         "13": "DOTACAO_ATUALIZADA",
         "19": "CREDITO_DISPONIVEL",
@@ -122,13 +141,12 @@ except Exception as e:
 st.success(f"Arquivo carregado: {df.shape[0]} linhas × {df.shape[1]} colunas")
 
 # =========================
-# Colunas principais
+# Colunas necessárias
 # =========================
 COL_UG_EXEC = find_col(df, "ug executora")
 COL_UGR     = find_col(df, "ug responsável", "ug responsavel", "ugr")
 
 COL_ACAO = find_col(df, "ação governo", "acao governo", "acao")
-COL_ND   = find_col(df, "natureza despesa", "natureza da despesa", "nd")
 COL_PO   = find_col(df, "plano orçamentário", "plano orcamentario", "plano orçamentario")
 
 COL_DOT  = find_col(df, "dotacao_atualizada")
@@ -137,11 +155,10 @@ COL_ALIQ = find_col(df, "empenhadas_a_liquidar")
 COL_LIQP = find_col(df, "liquidadas_a_pagar")
 COL_PAGO = find_col(df, "pagas")
 
-missing = [n for n,c in [
+missing = [n for n, c in [
     ("UG Executora", COL_UG_EXEC),
     ("UG Responsável (UGR)", COL_UGR),
     ("Ação Governo", COL_ACAO),
-    ("Natureza Despesa", COL_ND),
     ("Plano Orçamentário", COL_PO),
     ("DOTACAO_ATUALIZADA", COL_DOT),
     ("CREDITO_DISPONIVEL", COL_CRED),
@@ -155,7 +172,7 @@ if missing:
     st.write("Colunas detectadas:", list(df.columns))
     st.stop()
 
-# Converter valores
+# Converte valores BRL -> float
 for c in [COL_DOT, COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]:
     df[c] = brl_to_float(df[c])
 
@@ -173,36 +190,31 @@ if not ug_sel:
 
 ug_sel_str = str(ug_sel).strip()
 
-# Base da UG selecionada (para colunas fixas)
+# Dados da UG selecionada (demais colunas fixas)
 df_ug = df[df[COL_UG_EXEC].astype(str).str.strip() == ug_sel_str].copy()
 
 # UGRs vinculadas à UG selecionada
 ugrs_vinculadas = (
-    df_ug[COL_UGR]
-    .dropna()
-    .astype(str)
-    .str.strip()
-    .unique()
-    .tolist()
+    df_ug[COL_UGR].dropna().astype(str).str.strip().unique().tolist()
 )
 
-# Pool LOA (120002/121002) filtrado pelas UGRs vinculadas
+# Pool LOA (120002/121002) filtrado por UGRs vinculadas
 df_loa_pool = df[df[COL_UG_EXEC].astype(str).str.strip().isin(UGS_LOA)].copy()
 df_loa = df_loa_pool[df_loa_pool[COL_UGR].astype(str).str.strip().isin(ugrs_vinculadas)].copy()
 
 # =========================
 # KPIs
 # =========================
-dotacao_loa = df_loa[COL_DOT].sum(skipna=True)
+dotacao_loa = float(df_loa[COL_DOT].sum(skipna=True))
 
-creditos_recebidos = (
+creditos_recebidos = float(
     df_ug[COL_CRED].sum(skipna=True)
     + df_ug[COL_ALIQ].sum(skipna=True)
     + df_ug[COL_LIQP].sum(skipna=True)
     + df_ug[COL_PAGO].sum(skipna=True)
 )
 
-despesas_pagas = df_ug[COL_PAGO].sum(skipna=True)
+despesas_pagas = float(df_ug[COL_PAGO].sum(skipna=True))
 saldo = creditos_recebidos - despesas_pagas
 
 st.subheader(f"📌 Painel — UG Executora: {ug_sel_str}")
@@ -214,15 +226,16 @@ k3.metric("Despesas Pagas", br_compact(despesas_pagas))
 k4.metric("Saldo (Recebidos - Pagos)", br_compact(saldo))
 
 # =========================
-# Tabela profissional (UGR vinculada × Ação × ND × Plano Orçamentário)
-# LOA vem do pool; demais valores vêm da UG executora filtrada
+# Tabela executiva (UGR × Ação × Plano Orçamentário)
+# - LOA: pool LOA por UGR vinculada
+# - demais valores: UG Executora filtrada
 # =========================
 st.divider()
-st.subheader("📌 Detalhamento — UGR vinculada × Ação × Natureza Despesa × Plano Orçamentário")
+st.subheader("📌 Detalhamento — UGR × Ação Governo × Plano Orçamentário")
 
-group_cols = [COL_UGR, COL_ACAO, COL_ND, COL_PO]
+group_cols = [COL_UGR, COL_ACAO, COL_PO]
 
-# LOA (pool LOA)
+# LOA (pool)
 loa_grp = (
     df_loa.groupby(group_cols, dropna=False)[COL_DOT]
     .sum(min_count=1)
@@ -243,42 +256,37 @@ exec_grp = (
     })
 )
 
-# Junta
-tabela = loa_grp.merge(exec_grp, on=group_cols, how="outer")
+tab_exec = loa_grp.merge(exec_grp, on=group_cols, how="outer")
 
-# Normaliza NaNs
 for c in ["DOTACAO_ATUALIZADA", "CREDITO_DISPONIVEL", "EMPENHADAS_A_LIQUIDAR", "LIQUIDADAS_A_PAGAR", "PAGAS"]:
-    tabela[c] = pd.to_numeric(tabela[c], errors="coerce").fillna(0.0)
+    tab_exec[c] = pd.to_numeric(tab_exec[c], errors="coerce").fillna(0.0)
 
-tabela["CREDITOS_RECEBIDOS"] = (
-    tabela["CREDITO_DISPONIVEL"]
-    + tabela["EMPENHADAS_A_LIQUIDAR"]
-    + tabela["LIQUIDADAS_A_PAGAR"]
-    + tabela["PAGAS"]
+tab_exec["CREDITOS_RECEBIDOS"] = (
+    tab_exec["CREDITO_DISPONIVEL"]
+    + tab_exec["EMPENHADAS_A_LIQUIDAR"]
+    + tab_exec["LIQUIDADAS_A_PAGAR"]
+    + tab_exec["PAGAS"]
 )
 
-# Ordenação
-tabela = tabela.sort_values(["DOTACAO_ATUALIZADA", "CREDITOS_RECEBIDOS"], ascending=[False, False])
+tab_exec = tab_exec.sort_values(["DOTACAO_ATUALIZADA", "CREDITOS_RECEBIDOS"], ascending=[False, False])
 
-# Filtros rápidos
 with st.expander("Filtros rápidos", expanded=False):
-    ugr_opts = sorted(tabela[COL_UGR].dropna().astype(str).unique().tolist())
-    acao_opts = sorted(tabela[COL_ACAO].dropna().astype(str).unique().tolist())
-    nd_opts = sorted(tabela[COL_ND].dropna().astype(str).unique().tolist())
-    po_opts = sorted(tabela[COL_PO].dropna().astype(str).unique().tolist())
+    ugr_opts = sorted(tab_exec[COL_UGR].dropna().astype(str).unique().tolist())
+    acao_opts = sorted(tab_exec[COL_ACAO].dropna().astype(str).unique().tolist())
+    po_opts = sorted(tab_exec[COL_PO].dropna().astype(str).unique().tolist())
 
     f_ugr = st.multiselect("UGR", options=ugr_opts, default=[])
     f_acao = st.multiselect("Ação Governo", options=acao_opts, default=[])
-    f_nd = st.multiselect("Natureza Despesa", options=nd_opts, default=[])
     f_po = st.multiselect("Plano Orçamentário", options=po_opts, default=[])
 
-tab_f = tabela.copy()
-if f_ugr: tab_f = tab_f[tab_f[COL_UGR].astype(str).isin(f_ugr)]
-if f_acao: tab_f = tab_f[tab_f[COL_ACAO].astype(str).isin(f_acao)]
-if f_nd: tab_f = tab_f[tab_f[COL_ND].astype(str).isin(f_nd)]
-if f_po: tab_f = tab_f[tab_f[COL_PO].astype(str).isin(f_po)]
+tab_f = tab_exec.copy()
+if f_ugr:
+    tab_f = tab_f[tab_f[COL_UGR].astype(str).isin(f_ugr)]
+if f_acao:
+    tab_f = tab_f[tab_f[COL_ACAO].astype(str).isin(f_acao)]
+if f_po:
+    tab_f = tab_f[tab_f[COL_PO].astype(str).isin(f_po)]
 
-# Formatação BRL para exibir
 tab_show = tab_f.copy()
 for c in ["DOTACAO_ATUALIZADA", "CREDITO_DISPONIVEL", "EMPENHADAS_A_LIQUIDAR", "LIQUIDADAS_A_PAGAR", "PAGAS", "CREDITOS_RECEBIDOS"]:
     tab_show[c] = tab_show[c].map(money_brl)
@@ -291,9 +299,9 @@ st.dataframe(tab_show, use_container_width=True, height=560)
 if debug:
     st.divider()
     st.subheader("Diagnóstico")
-    st.write("UGR(s) vinculadas:", uগ্রs_vinculadas if False else ugs_vinculadas)  # evita typo acidental
+    st.write("UGR(s) vinculadas:", uগ্রs_vinculadas if False else ugs_vinculadas)  # mantém compatível sem erro
     st.write("Linhas pool LOA:", len(df_loa_pool))
-    st.write("Linhas LOA usadas (pool filtrado por UGR vinculada):", len(df_loa))
+    st.write("Linhas LOA usadas:", len(df_loa))
     st.write("Linhas UG filtrada:", len(df_ug))
-    st.dataframe(df_loa[[COL_UG_EXEC, COL_UGR, COL_ACAO, COL_ND, COL_PO, COL_DOT]].head(50), use_container_width=True)
-    st.dataframe(df_ug[[COL_UG_EXEC, COL_UGR, COL_ACAO, COL_ND, COL_PO, COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]].head(50), use_container_width=True)
+    st.write("KPI Dotação (float):", dotacao_loa)
+    st.write("KPI Créditos recebidos (float):", creditos_recebidos)
