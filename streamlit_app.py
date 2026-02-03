@@ -4,76 +4,55 @@ import requests
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(layout="wide")
-st.title("TESTE — Leitura CSV Google Drive")
+st.title("TESTE — Leitura CSV (corrigido)")
 
 FILE_ID = "1s-lIrHxMZMRnCOayQeQ5ML0LpLbVTRNy"
 URL = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
 
-def bytes_to_text(data: bytes) -> str:
-    for enc in ("utf-8-sig", "utf-8", "latin1", "cp1252"):
-        try:
-            return data.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    return data.decode("utf-8", errors="replace")
-
-def preprocess_csv_text(csv_text: str) -> str:
-    lines = csv_text.splitlines()
-    if len(lines) < 4:
-        raise ValueError(f"Poucas linhas ({len(lines)}). Não dá pra remover 1ª e 2 últimas.")
-    kept = lines[1:-2]  # remove 1ª e 2 últimas
-    return "\n".join(kept)
-
-def baixar_drive(url: str) -> tuple[bytes, str]:
+def baixar_drive(url: str) -> bytes:
     s = requests.Session()
     r = s.get(url, timeout=120, allow_redirects=True)
     r.raise_for_status()
+    return r.content
 
-    ctype = (r.headers.get("Content-Type") or "")
-    data = r.content
+def decode_cp1252(data: bytes) -> str:
+    return data.decode("cp1252", errors="replace")
 
-    # Se veio HTML, tenta token confirm=
-    if ("text/html" in ctype.lower()) or data[:20].lstrip().startswith(b"<"):
-        html = r.text
-        m = re.search(r'confirm=([0-9A-Za-z_]+)', html)
-        if m:
-            confirm = m.group(1)
-            r2 = s.get(url + f"&confirm={confirm}", timeout=120, allow_redirects=True)
-            r2.raise_for_status()
-            ctype = (r2.headers.get("Content-Type") or "")
-            data = r2.content
+def limpar_linhas_iniciais(text: str) -> str:
+    # remove quaisquer linhas iniciais que não pareçam parte do CSV
+    lines = text.splitlines()
+    # acha a primeira linha "de verdade" (normalmente começa com aspas)
+    start = 0
+    for i, ln in enumerate(lines):
+        if ln.strip().startswith('"'):
+            start = i
+            break
+    lines = lines[start:]
+    # aplica sua regra: remove 1ª linha e 2 últimas
+    if len(lines) < 4:
+        raise ValueError(f"Poucas linhas após limpeza ({len(lines)})")
+    lines = lines[1:-2]
+    return "\n".join(lines)
 
-    return data, ctype
+if st.button("Baixar e ler"):
+    data = baixar_drive(URL)
+    st.write("Bytes:", len(data))
+    st.code(data[:200].decode("cp1252", errors="replace"))
 
-if st.button("Baixar e testar leitura"):
-    data, ctype = baixar_drive(URL)
+    text = decode_cp1252(data)
+    treated = limpar_linhas_iniciais(text)
 
-    st.write("Content-Type recebido:", ctype)
-    st.write("Tamanho (bytes):", len(data))
+    # leitura robusta de CSV com vírgula e aspas
+    df = pd.read_csv(
+        io.StringIO(treated),
+        sep=",",
+        header=0,
+        dtype=str,
+        engine="python",
+        quotechar='"',
+        skipinitialspace=True,
+    )
 
-    preview = data[:300]
-    st.code(preview.decode("utf-8", errors="replace"))
-
-    # Se ainda for HTML, para aqui com mensagem clara
-    if preview.lstrip().startswith(b"<"):
-        st.error("⚠️ Veio HTML do Google Drive (não veio o CSV). Ajuste permissão: 'Qualquer pessoa com o link' (Visualizador).")
-        st.stop()
-
-    text = bytes_to_text(data)
-    treated = preprocess_csv_text(text)
-
-    # tenta separadores
-    for sep in (";", ",", "\t"):
-        try:
-            df = pd.read_csv(io.StringIO(treated), sep=sep, header=0, dtype=str)
-            if df.shape[1] == 1 and sep != "\t":
-                continue
-            st.success(f"✅ Leu CSV com separador '{sep}' — {df.shape[0]} linhas × {df.shape[1]} colunas")
-            st.write("Colunas:", list(df.columns))
-            st.dataframe(df.head(20), use_container_width=True)
-            st.stop()
-        except Exception as e:
-            last_err = e
-
-    st.error(f"Não consegui ler como CSV. Último erro: {last_err}")
+    st.success(f"OK: {df.shape[0]} linhas × {df.shape[1]} colunas")
+    st.write("Colunas:", list(df.columns))
+    st.dataframe(df.head(20), use_container_width=True)
