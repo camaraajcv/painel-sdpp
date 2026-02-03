@@ -4,7 +4,13 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
-import altair as alt
+
+# Altair é o mais “BI” no Streamlit; se não estiver instalado, os gráficos caem em fallback automaticamente.
+try:
+    import altair as alt
+    _HAS_ALTAIR = True
+except Exception:
+    _HAS_ALTAIR = False
 
 st.set_page_config(page_title="Painel de Gastos — Google Drive", layout="wide")
 
@@ -18,40 +24,20 @@ URL = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
 UGS_LOA = {"120002", "121002"}
 
 # =========================
-# Estilo (KPIs em cards)
+# CSS (KPIs em cards lado a lado + centralizados)
 # =========================
 st.markdown("""
 <style>
-.kpi-grid{
-  display:grid;
-  grid-template-columns:repeat(4, minmax(0, 1fr));
-  gap:12px;
-  margin-top:8px;
-  margin-bottom:8px;
-}
 .kpi-card{
   border-radius:16px;
-  padding:14px 14px 12px;
+  padding:14px 12px;
   border:1px solid rgba(255,255,255,.25);
   box-shadow:0 10px 24px rgba(0,0,0,.10);
-  color:#0b1220;
+  text-align:center;
 }
-.kpi-title{
-  font-size:0.85rem;
-  opacity:.85;
-  margin-bottom:8px;
-}
-.kpi-value{
-  font-size:1.60rem;
-  font-weight:850;
-  letter-spacing:-0.02em;
-  line-height:1.1;
-}
-.kpi-sub{
-  font-size:0.80rem;
-  opacity:.78;
-  margin-top:6px;
-}
+.kpi-title{font-size:.85rem; opacity:.85; margin-bottom:6px;}
+.kpi-value{font-size:1.45rem; font-weight:850; letter-spacing:-0.02em; line-height:1.1;}
+.kpi-sub{font-size:.78rem; opacity:.78; margin-top:6px;}
 .kpi-1{ background:linear-gradient(135deg, #dbeafe 0%, #eff6ff 55%, #ffffff 100%); }
 .kpi-2{ background:linear-gradient(135deg, #dcfce7 0%, #f0fdf4 55%, #ffffff 100%); }
 .kpi-3{ background:linear-gradient(135deg, #ffedd5 0%, #fff7ed 55%, #ffffff 100%); }
@@ -177,11 +163,11 @@ def carregar_df():
 # =========================
 st.title("📊 Painel de Gastos — Google Drive")
 
-colA, colB = st.columns([1, 1])
-with colA:
+top1, top2 = st.columns([1, 1])
+with top1:
     if st.button("🔄 Atualizar agora"):
         st.cache_data.clear()
-with colB:
+with top2:
     debug = st.checkbox("Mostrar diagnóstico", value=False)
 
 try:
@@ -190,16 +176,16 @@ except Exception as e:
     st.error(f"Erro ao ler arquivo do Google Drive: {e}")
     st.stop()
 
-st.success(f"Arquivo carregado: {df.shape[0]} linhas × {df.shape[1]} colunas")
-
 # =========================
 # Colunas necessárias
 # =========================
+COL_NECCOR  = find_col(df, "ne ccor", "neccor")
 COL_UG_EXEC = find_col(df, "ug executora")
 COL_UGR     = find_col(df, "ug responsável", "ug responsavel", "ugr")
-COL_ACAO    = find_col(df, "ação governo", "acao governo", "acao")
-COL_ND      = find_col(df, "natureza despesa", "natureza da despesa", "nd")
-COL_PO      = find_col(df, "plano orçamentário", "plano orcamentario", "plano orçamentario", "plano orcamentário")
+
+COL_ACAO = find_col(df, "ação governo", "acao governo", "acao")
+COL_ND   = find_col(df, "natureza despesa", "natureza da despesa", "nd")
+COL_PO   = find_col(df, "plano orçamentário", "plano orcamentario", "plano orçamentario", "plano orcamentário")
 
 COL_DOT  = find_col(df, "dotacao_atualizada")
 COL_CRED = find_col(df, "credito_disponivel")
@@ -228,6 +214,8 @@ if missing:
 # Converte valores BRL -> float
 for c in [COL_DOT, COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]:
     df[c] = brl_to_float(df[c])
+
+st.success(f"Arquivo carregado: {df.shape[0]} linhas × {df.shape[1]} colunas")
 
 # =========================
 # Sidebar (UG obrigatória)
@@ -272,12 +260,15 @@ saldo = creditos_recebidos - despesas_pagas
 
 st.subheader(f"📌 Painel — UG Executora: {ug_sel_str}")
 
-st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
-kpi_card("Dotação Atualizada (LOA)", br_compact(dotacao_loa), "Pool 120002/121002 por UGRs vinculadas", "kpi-1")
-kpi_card("Créditos Recebidos", br_compact(creditos_recebidos), "CD + ALIQ + LAP + Pagas (UG selecionada)", "kpi-2")
-kpi_card("Despesas Pagas", br_compact(despesas_pagas), "Controle empenho (UG selecionada)", "kpi-3")
-kpi_card("Saldo", br_compact(saldo), "Recebidos − Pagos", "kpi-4")
-st.markdown('</div>', unsafe_allow_html=True)
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    kpi_card("Dotação Atualizada (LOA)", br_compact(dotacao_loa), "Pool 120002/121002 por UGRs vinculadas", "kpi-1")
+with c2:
+    kpi_card("Créditos Recebidos", br_compact(creditos_recebidos), "CD + ALIQ + LAP + Pagas (UG selecionada)", "kpi-2")
+with c3:
+    kpi_card("Despesas Pagas", br_compact(despesas_pagas), "Controle empenho (UG selecionada)", "kpi-3")
+with c4:
+    kpi_card("Saldo", br_compact(saldo), "Recebidos − Pagos", "kpi-4")
 
 st.caption("Regras: **Dotação (LOA)** vem do pool 120002/121002 filtrado por **UGRs vinculadas**; demais valores são da **UG Executora selecionada**.")
 
@@ -289,7 +280,7 @@ st.subheader("📌 Detalhamento — UGR × Ação Governo × Natureza Despesa ×
 
 group_cols = [COL_UGR, COL_ACAO, COL_ND, COL_PO]
 
-# LOA (pool) por dimensões
+# LOA (pool)
 loa_grp = (
     df_loa.groupby(group_cols, dropna=False)[COL_DOT]
     .sum(min_count=1)
@@ -297,7 +288,7 @@ loa_grp = (
     .rename(columns={COL_DOT: "DOTACAO_ATUALIZADA"})
 )
 
-# Execução (UG selecionada) por dimensões
+# Execução (UG selecionada)
 exec_grp = (
     df_ug.groupby(group_cols, dropna=False)[[COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]]
     .sum(min_count=1)
@@ -324,7 +315,6 @@ tab_exec["CREDITOS_RECEBIDOS"] = (
 
 tab_exec = tab_exec.sort_values(["DOTACAO_ATUALIZADA", "CREDITOS_RECEBIDOS"], ascending=[False, False])
 
-# Filtros rápidos (mais “modernos” em colunas)
 with st.expander("Filtros rápidos", expanded=False):
     f1, f2, f3, f4 = st.columns([1, 1, 1, 1])
 
@@ -343,14 +333,10 @@ with st.expander("Filtros rápidos", expanded=False):
         f_po = st.multiselect("Plano Orç.", options=po_opts, default=[], placeholder="Selecione...")
 
 tab_f = tab_exec.copy()
-if f_ugr:
-    tab_f = tab_f[tab_f[COL_UGR].astype(str).isin(f_ugr)]
-if f_acao:
-    tab_f = tab_f[tab_f[COL_ACAO].astype(str).isin(f_acao)]
-if f_nd:
-    tab_f = tab_f[tab_f[COL_ND].astype(str).isin(f_nd)]
-if f_po:
-    tab_f = tab_f[tab_f[COL_PO].astype(str).isin(f_po)]
+if f_ugr: tab_f = tab_f[tab_f[COL_UGR].astype(str).isin(f_ugr)]
+if f_acao: tab_f = tab_f[tab_f[COL_ACAO].astype(str).isin(f_acao)]
+if f_nd:  tab_f = tab_f[tab_f[COL_ND].astype(str).isin(f_nd)]
+if f_po:  tab_f = tab_f[tab_f[COL_PO].astype(str).isin(f_po)]
 
 tab_show = tab_f.copy()
 for c in ["DOTACAO_ATUALIZADA", "CREDITO_DISPONIVEL", "EMPENHADAS_A_LIQUIDAR", "LIQUIDADAS_A_PAGAR", "PAGAS", "CREDITOS_RECEBIDOS"]:
@@ -359,17 +345,21 @@ for c in ["DOTACAO_ATUALIZADA", "CREDITO_DISPONIVEL", "EMPENHADAS_A_LIQUIDAR", "
 st.dataframe(tab_show, use_container_width=True, height=560)
 
 # =========================
-# Gráficos por Ação (UG executora selecionada)
+# Gráficos — 1 por métrica (por Ação) + combinado (linhas)
 # =========================
 st.divider()
-st.subheader("📈 Gráficos — por Ação Governo (valores da UG executora selecionada)")
+st.subheader("📈 Gráficos — por Ação Governo (UG executora selecionada)")
+
+# limpa ação (evita “tudo cair em uma ação” por espaços/ruídos)
+df_ug["_ACAO_"] = df_ug[COL_ACAO].astype(str).str.strip()
+df_ug_g = df_ug[df_ug["_ACAO_"].notna() & (df_ug["_ACAO_"] != "")].copy()
 
 acao_sum = (
-    df_ug.groupby(COL_ACAO, dropna=False)[[COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]]
+    df_ug_g.groupby("_ACAO_", dropna=False)[[COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]]
     .sum(min_count=1)
     .reset_index()
     .rename(columns={
-        COL_ACAO: "Ação Governo",
+        "_ACAO_": "Ação Governo",
         COL_CRED: "Crédito disponível",
         COL_ALIQ: "Empenhadas a liquidar",
         COL_LIQP: "Liquidadas a pagar",
@@ -384,50 +374,104 @@ acao_sum["Créditos recebidos"] = (
     + acao_sum["Pagas"]
 )
 
-# Ordena para os gráficos ficarem mais legíveis
 acao_sum = acao_sum.sort_values("Créditos recebidos", ascending=False)
 
-# Gráfico 1: Créditos recebidos por Ação (barra)
-chart1 = alt.Chart(acao_sum).mark_bar().encode(
-    x=alt.X("Ação Governo:N", sort="-y", title="Ação Governo"),
-    y=alt.Y("Créditos recebidos:Q", title="R$"),
-    tooltip=["Ação Governo", "Créditos recebidos", "Crédito disponível", "Empenhadas a liquidar", "Liquidadas a pagar", "Pagas"]
-).properties(height=340)
+if acao_sum.empty:
+    st.info("Sem dados suficientes para gráficos por Ação nesta UG (ação vazia).")
+else:
+    st.caption(f"Ações distintas na UG filtrada: {len(acao_sum)}")
 
-st.altair_chart(chart1, use_container_width=True)
+    def _bar_chart(df_plot: pd.DataFrame, y_col: str, title: str):
+        if _HAS_ALTAIR:
+            ch = (
+                alt.Chart(df_plot, title=title)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Ação Governo:N", sort="-y", title="Ação Governo"),
+                    y=alt.Y(f"{y_col}:Q", title="R$"),
+                    tooltip=["Ação Governo", y_col],
+                )
+                .properties(height=320)
+            )
+            st.altair_chart(ch, use_container_width=True)
+        else:
+            st.subheader(title)
+            st.bar_chart(df_plot.set_index("Ação Governo")[[y_col]], height=320)
 
-# Gráfico 2: Comparação (stack) dos componentes — sem dotação
-stack = acao_sum.melt(
-    id_vars=["Ação Governo"],
-    value_vars=["Crédito disponível", "Empenhadas a liquidar", "Liquidadas a pagar", "Pagas"],
-    var_name="Componente",
-    value_name="Valor"
-)
+    g1, g2 = st.columns(2)
+    with g1:
+        _bar_chart(acao_sum, "Créditos recebidos", "Créditos recebidos por Ação")
+    with g2:
+        _bar_chart(acao_sum, "Pagas", "Despesas pagas por Ação")
 
-chart2 = alt.Chart(stack).mark_bar().encode(
-    x=alt.X("Ação Governo:N", sort="-y", title="Ação Governo"),
-    y=alt.Y("Valor:Q", stack=True, title="R$"),
-    color=alt.Color("Componente:N", legend=alt.Legend(title="Componente")),
-    tooltip=["Ação Governo", "Componente", "Valor"]
-).properties(height=380)
+    g3, g4 = st.columns(2)
+    with g3:
+        _bar_chart(acao_sum, "Crédito disponível", "Crédito disponível por Ação")
+    with g4:
+        _bar_chart(acao_sum, "Empenhadas a liquidar", "Empenhadas a liquidar por Ação")
 
-st.altair_chart(chart2, use_container_width=True)
+    # Combinado (linhas)
+    st.subheader("Comparativo (linhas) — Créditos recebidos e componentes (por Ação)")
+    combo = acao_sum[[
+        "Ação Governo",
+        "Créditos recebidos",
+        "Crédito disponível",
+        "Empenhadas a liquidar",
+        "Liquidadas a pagar",
+        "Pagas"
+    ]].melt(id_vars=["Ação Governo"], var_name="Métrica", value_name="Valor")
 
-# (Opcional) Gráfico 3: Pagas vs Recebidos (% por ação)
-acao_sum["% Pagas/Recebidos"] = np.where(
-    acao_sum["Créditos recebidos"] > 0,
-    (acao_sum["Pagas"] / acao_sum["Créditos recebidos"]) * 100.0,
-    0.0
-)
+    if _HAS_ALTAIR:
+        order_x = acao_sum["Ação Governo"].tolist()
+        line = (
+            alt.Chart(combo, title="Linhas: Recebidos vs componentes (por Ação)")
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("Ação Governo:N", sort=order_x, title="Ação Governo"),
+                y=alt.Y("Valor:Q", title="R$"),
+                color=alt.Color("Métrica:N", title="Métrica"),
+                tooltip=["Ação Governo", "Métrica", "Valor"],
+            )
+            .properties(height=420)
+        )
+        st.altair_chart(line, use_container_width=True)
+    else:
+        st.info("Altair não disponível: exibindo tabela do comparativo.")
+        st.dataframe(combo, use_container_width=True)
 
-chart3 = alt.Chart(acao_sum).mark_bar().encode(
-    x=alt.X("Ação Governo:N", sort="-y", title="Ação Governo"),
-    y=alt.Y("% Pagas/Recebidos:Q", title="%"),
-    tooltip=["Ação Governo", "% Pagas/Recebidos", "Pagas", "Créditos recebidos"]
-).properties(height=300)
+# =========================
+# Abaixo de tudo: NE CCOR com (ALIQ, LIQP, PAGAS)
+# =========================
+st.divider()
+st.subheader("📌 NE CCOR — Empenhadas a liquidar × Liquidadas a pagar × Pagas (UG selecionada)")
 
-st.subheader("📊 Percentual — Pagas / Créditos Recebidos (por Ação)")
-st.altair_chart(chart3, use_container_width=True)
+if COL_NECCOR is None:
+    st.info("Coluna 'NE CCor' não encontrada no arquivo.")
+else:
+    df_ug["_NECCOR_"] = df_ug[COL_NECCOR].astype(str).str.strip()
+    ne_tab = (
+        df_ug.groupby("_NECCOR_", dropna=False)[[COL_ALIQ, COL_LIQP, COL_PAGO]]
+        .sum(min_count=1)
+        .reset_index()
+        .rename(columns={
+            "_NECCOR_": "NE CCor",
+            COL_ALIQ: "Empenhadas a liquidar",
+            COL_LIQP: "Liquidadas a pagar",
+            COL_PAGO: "Pagas",
+        })
+    )
+
+    # ordena pelo “impacto” (pagas + liquidar + a pagar)
+    ne_tab["Total (3 colunas)"] = (
+        ne_tab["Empenhadas a liquidar"] + ne_tab["Liquidadas a pagar"] + ne_tab["Pagas"]
+    )
+    ne_tab = ne_tab.sort_values("Total (3 colunas)", ascending=False)
+
+    ne_show = ne_tab.copy()
+    for c in ["Empenhadas a liquidar", "Liquidadas a pagar", "Pagas", "Total (3 colunas)"]:
+        ne_show[c] = ne_show[c].map(money_brl)
+
+    st.dataframe(ne_show, use_container_width=True, height=520)
 
 # =========================
 # Diagnóstico
@@ -435,15 +479,14 @@ st.altair_chart(chart3, use_container_width=True)
 if debug:
     st.divider()
     st.subheader("Diagnóstico")
-
     st.write("UG Executora selecionada:", ug_sel_str)
     st.write("UGR(s) vinculadas:", ugrs_vinculadas)
-
     st.write("Linhas pool LOA:", len(df_loa_pool))
     st.write("Linhas LOA usadas:", len(df_loa))
     st.write("Linhas UG filtrada:", len(df_ug))
-
     st.write("Dotação (float):", dotacao_loa)
     st.write("Créditos recebidos (float):", creditos_recebidos)
     st.write("Pagas (float):", despesas_pagas)
     st.write("Saldo (float):", saldo)
+    if not _HAS_ALTAIR:
+        st.warning("Altair não disponível nesta execução. Se quiser gráficos Altair no Cloud, inclua 'altair' no requirements.txt.")
