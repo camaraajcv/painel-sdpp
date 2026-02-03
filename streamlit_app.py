@@ -84,39 +84,59 @@ def read_table_from_bytes(data: bytes, source_name: str = "arquivo") -> pd.DataF
         raise ValueError(f"Não consegui interpretar {source_name} como CSV nem como Excel. Detalhe: {e}")
 
 
-def baixar_onedrive_publico(url: str) -> bytes:
-    s = requests.Session()
+import requests
+import re
+
+def baixar_onedrive(url: str) -> bytes:
+    session = requests.Session()
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-        "Referer": "https://onedrive.live.com/",
     }
 
-    # 1) abre a página do compartilhamento
-    r = s.get(url, headers=headers, timeout=240, allow_redirects=True)
+    # Abre a página do compartilhamento
+    r = session.get(url, headers=headers, timeout=240)
     r.raise_for_status()
 
-    html = r.text
-
-    # 2) tenta achar uma URL de download dentro do HTML (varia, mas esse padrão pega muitos casos)
-    m = re.search(r'"downloadUrl":"(https:[^"]+)"', html)
+    # Procura o link real de download dentro do HTML
+    m = re.search(r'"downloadUrl":"(https:[^"]+)"', r.text)
     if not m:
-        raise RuntimeError("Não encontrei downloadUrl na página. Gere um link 'Qualquer pessoa' ou use Graph API.")
+        raise RuntimeError(
+            "Não consegui extrair o downloadUrl. "
+            "Verifique se o link está como 'Qualquer pessoa com o link'."
+        )
 
     download_url = m.group(1).encode("utf-8").decode("unicode_escape")
 
-    # 3) baixa o arquivo real
-    f = s.get(download_url, headers=headers, timeout=240)
-    f.raise_for_status()
-    return f.content
-    return r.content
+    # Baixa o arquivo real
+    file = session.get(download_url, headers=headers, timeout=240)
+    file.raise_for_status()
 
+    return file.content
+def ler_excel_tratado(data: bytes) -> pd.DataFrame:
+    # pula a 1ª linha -> a 2ª vira cabeçalho
+    df = pd.read_excel(io.BytesIO(data), skiprows=1, dtype=str)
 
+    # remove as 2 últimas linhas
+    if len(df) >= 2:
+        df = df.iloc[:-2].copy()
+
+    return df
 # =========================
 # UI
 # =========================
 st.title("📊 Painel de Gastos — Leitura diária do OneDrive")
+url = "https://1drv.ms/x/c/79e2ea2aaf97ea6b/IQDp1qtpsZGETq8oyyOl8lacAYtMfzw3hr9M5F-mEYGVKv4?e=kRjGNt"
+
+try:
+    data = baixar_onedrive(url)
+    df = ler_excel_tratado(data)
+
+except Exception as e:
+    st.error(f"Erro ao ler arquivo do OneDrive: {e}")
+    st.stop()
+
+st.success(f"Arquivo carregado: {df.shape[0]} linhas")
 
 with st.sidebar:
     st.header("Fonte de dados")
