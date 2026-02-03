@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+import altair as alt
 
 st.set_page_config(page_title="Painel de Gastos — Google Drive", layout="wide")
 
@@ -15,6 +16,61 @@ URL = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
 
 # Pool LOA (UGs onde a dotação aparece)
 UGS_LOA = {"120002", "121002"}
+
+# =========================
+# Estilo (KPIs em cards)
+# =========================
+st.markdown("""
+<style>
+.kpi-grid{
+  display:grid;
+  grid-template-columns:repeat(4, minmax(0, 1fr));
+  gap:12px;
+  margin-top:8px;
+  margin-bottom:8px;
+}
+.kpi-card{
+  border-radius:16px;
+  padding:14px 14px 12px;
+  border:1px solid rgba(255,255,255,.25);
+  box-shadow:0 10px 24px rgba(0,0,0,.10);
+  color:#0b1220;
+}
+.kpi-title{
+  font-size:0.85rem;
+  opacity:.85;
+  margin-bottom:8px;
+}
+.kpi-value{
+  font-size:1.60rem;
+  font-weight:850;
+  letter-spacing:-0.02em;
+  line-height:1.1;
+}
+.kpi-sub{
+  font-size:0.80rem;
+  opacity:.78;
+  margin-top:6px;
+}
+.kpi-1{ background:linear-gradient(135deg, #dbeafe 0%, #eff6ff 55%, #ffffff 100%); }
+.kpi-2{ background:linear-gradient(135deg, #dcfce7 0%, #f0fdf4 55%, #ffffff 100%); }
+.kpi-3{ background:linear-gradient(135deg, #ffedd5 0%, #fff7ed 55%, #ffffff 100%); }
+.kpi-4{ background:linear-gradient(135deg, #fae8ff 0%, #fdf4ff 55%, #ffffff 100%); }
+.small-note{font-size:.78rem; opacity:.75}
+</style>
+""", unsafe_allow_html=True)
+
+def kpi_card(title: str, value: str, subtitle: str, cls: str):
+    st.markdown(
+        f"""
+        <div class="kpi-card {cls}">
+          <div class="kpi-title">{title}</div>
+          <div class="kpi-value">{value}</div>
+          <div class="kpi-sub">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 # =========================
 # Helpers
@@ -36,19 +92,15 @@ def br_compact(x: float) -> str:
     """
     x = _to_float(x)
     absx = abs(x)
-
     if absx >= 1_000_000_000:
         v = x / 1_000_000_000
-        s = f"{v:.2f}".replace(".", ",")
-        return f"R$ {s} bi"
+        return f"R$ {str(f'{v:.2f}').replace('.', ',')} bi"
     if absx >= 1_000_000:
         v = x / 1_000_000
-        s = f"{v:.2f}".replace(".", ",")
-        return f"R$ {s} mi"
+        return f"R$ {str(f'{v:.2f}').replace('.', ',')} mi"
     if absx >= 1_000:
         v = x / 1_000
-        s = f"{v:.2f}".replace(".", ",")
-        return f"R$ {s} mil"
+        return f"R$ {str(f'{v:.2f}').replace('.', ',')} mil"
     s = f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"R$ {s}"
 
@@ -121,7 +173,7 @@ def carregar_df():
     return df
 
 # =========================
-# UI
+# UI topo
 # =========================
 st.title("📊 Painel de Gastos — Google Drive")
 
@@ -145,9 +197,9 @@ st.success(f"Arquivo carregado: {df.shape[0]} linhas × {df.shape[1]} colunas")
 # =========================
 COL_UG_EXEC = find_col(df, "ug executora")
 COL_UGR     = find_col(df, "ug responsável", "ug responsavel", "ugr")
-
-COL_ACAO = find_col(df, "ação governo", "acao governo", "acao")
-COL_PO   = find_col(df, "plano orçamentário", "plano orcamentario", "plano orçamentario")
+COL_ACAO    = find_col(df, "ação governo", "acao governo", "acao")
+COL_ND      = find_col(df, "natureza despesa", "natureza da despesa", "nd")
+COL_PO      = find_col(df, "plano orçamentário", "plano orcamentario", "plano orçamentario", "plano orcamentário")
 
 COL_DOT  = find_col(df, "dotacao_atualizada")
 COL_CRED = find_col(df, "credito_disponivel")
@@ -159,6 +211,7 @@ missing = [n for n, c in [
     ("UG Executora", COL_UG_EXEC),
     ("UG Responsável (UGR)", COL_UGR),
     ("Ação Governo", COL_ACAO),
+    ("Natureza Despesa", COL_ND),
     ("Plano Orçamentário", COL_PO),
     ("DOTACAO_ATUALIZADA", COL_DOT),
     ("CREDITO_DISPONIVEL", COL_CRED),
@@ -177,7 +230,7 @@ for c in [COL_DOT, COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]:
     df[c] = brl_to_float(df[c])
 
 # =========================
-# Filtro obrigatório UG Executora
+# Sidebar (UG obrigatória)
 # =========================
 with st.sidebar:
     st.header("Filtro obrigatório")
@@ -190,7 +243,7 @@ if not ug_sel:
 
 ug_sel_str = str(ug_sel).strip()
 
-# Dados da UG selecionada (demais colunas fixas)
+# Base da UG selecionada (demais valores fixos nela)
 df_ug = df[df[COL_UG_EXEC].astype(str).str.strip() == ug_sel_str].copy()
 
 # UGRs vinculadas à UG selecionada
@@ -219,23 +272,24 @@ saldo = creditos_recebidos - despesas_pagas
 
 st.subheader(f"📌 Painel — UG Executora: {ug_sel_str}")
 
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Dotação Atualizada (LOA)", br_compact(dotacao_loa))
-k2.metric("Créditos Recebidos", br_compact(creditos_recebidos))
-k3.metric("Despesas Pagas", br_compact(despesas_pagas))
-k4.metric("Saldo (Recebidos - Pagos)", br_compact(saldo))
+st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
+kpi_card("Dotação Atualizada (LOA)", br_compact(dotacao_loa), "Pool 120002/121002 por UGRs vinculadas", "kpi-1")
+kpi_card("Créditos Recebidos", br_compact(creditos_recebidos), "CD + ALIQ + LAP + Pagas (UG selecionada)", "kpi-2")
+kpi_card("Despesas Pagas", br_compact(despesas_pagas), "Controle empenho (UG selecionada)", "kpi-3")
+kpi_card("Saldo", br_compact(saldo), "Recebidos − Pagos", "kpi-4")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.caption("Regras: **Dotação (LOA)** vem do pool 120002/121002 filtrado por **UGRs vinculadas**; demais valores são da **UG Executora selecionada**.")
 
 # =========================
-# Tabela executiva (UGR × Ação × Plano Orçamentário)
-# - LOA: pool LOA por UGR vinculada
-# - demais valores: UG Executora filtrada
+# Tabela executiva com ND (UGR × Ação × ND × Plano)
 # =========================
 st.divider()
-st.subheader("📌 Detalhamento — UGR × Ação Governo × Plano Orçamentário")
+st.subheader("📌 Detalhamento — UGR × Ação Governo × Natureza Despesa × Plano Orçamentário")
 
-group_cols = [COL_UGR, COL_ACAO, COL_PO]
+group_cols = [COL_UGR, COL_ACAO, COL_ND, COL_PO]
 
-# LOA (pool)
+# LOA (pool) por dimensões
 loa_grp = (
     df_loa.groupby(group_cols, dropna=False)[COL_DOT]
     .sum(min_count=1)
@@ -243,7 +297,7 @@ loa_grp = (
     .rename(columns={COL_DOT: "DOTACAO_ATUALIZADA"})
 )
 
-# Execução (UG selecionada)
+# Execução (UG selecionada) por dimensões
 exec_grp = (
     df_ug.groupby(group_cols, dropna=False)[[COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]]
     .sum(min_count=1)
@@ -270,20 +324,31 @@ tab_exec["CREDITOS_RECEBIDOS"] = (
 
 tab_exec = tab_exec.sort_values(["DOTACAO_ATUALIZADA", "CREDITOS_RECEBIDOS"], ascending=[False, False])
 
+# Filtros rápidos (mais “modernos” em colunas)
 with st.expander("Filtros rápidos", expanded=False):
+    f1, f2, f3, f4 = st.columns([1, 1, 1, 1])
+
     ugr_opts = sorted(tab_exec[COL_UGR].dropna().astype(str).unique().tolist())
     acao_opts = sorted(tab_exec[COL_ACAO].dropna().astype(str).unique().tolist())
+    nd_opts = sorted(tab_exec[COL_ND].dropna().astype(str).unique().tolist())
     po_opts = sorted(tab_exec[COL_PO].dropna().astype(str).unique().tolist())
 
-    f_ugr = st.multiselect("UGR", options=ugr_opts, default=[])
-    f_acao = st.multiselect("Ação Governo", options=acao_opts, default=[])
-    f_po = st.multiselect("Plano Orçamentário", options=po_opts, default=[])
+    with f1:
+        f_ugr = st.multiselect("UGR", options=ugr_opts, default=[], placeholder="Selecione...")
+    with f2:
+        f_acao = st.multiselect("Ação", options=acao_opts, default=[], placeholder="Selecione...")
+    with f3:
+        f_nd = st.multiselect("Natureza", options=nd_opts, default=[], placeholder="Selecione...")
+    with f4:
+        f_po = st.multiselect("Plano Orç.", options=po_opts, default=[], placeholder="Selecione...")
 
 tab_f = tab_exec.copy()
 if f_ugr:
     tab_f = tab_f[tab_f[COL_UGR].astype(str).isin(f_ugr)]
 if f_acao:
     tab_f = tab_f[tab_f[COL_ACAO].astype(str).isin(f_acao)]
+if f_nd:
+    tab_f = tab_f[tab_f[COL_ND].astype(str).isin(f_nd)]
 if f_po:
     tab_f = tab_f[tab_f[COL_PO].astype(str).isin(f_po)]
 
@@ -293,3 +358,92 @@ for c in ["DOTACAO_ATUALIZADA", "CREDITO_DISPONIVEL", "EMPENHADAS_A_LIQUIDAR", "
 
 st.dataframe(tab_show, use_container_width=True, height=560)
 
+# =========================
+# Gráficos por Ação (UG executora selecionada)
+# =========================
+st.divider()
+st.subheader("📈 Gráficos — por Ação Governo (valores da UG executora selecionada)")
+
+acao_sum = (
+    df_ug.groupby(COL_ACAO, dropna=False)[[COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]]
+    .sum(min_count=1)
+    .reset_index()
+    .rename(columns={
+        COL_ACAO: "Ação Governo",
+        COL_CRED: "Crédito disponível",
+        COL_ALIQ: "Empenhadas a liquidar",
+        COL_LIQP: "Liquidadas a pagar",
+        COL_PAGO: "Pagas",
+    })
+)
+
+acao_sum["Créditos recebidos"] = (
+    acao_sum["Crédito disponível"]
+    + acao_sum["Empenhadas a liquidar"]
+    + acao_sum["Liquidadas a pagar"]
+    + acao_sum["Pagas"]
+)
+
+# Ordena para os gráficos ficarem mais legíveis
+acao_sum = acao_sum.sort_values("Créditos recebidos", ascending=False)
+
+# Gráfico 1: Créditos recebidos por Ação (barra)
+chart1 = alt.Chart(acao_sum).mark_bar().encode(
+    x=alt.X("Ação Governo:N", sort="-y", title="Ação Governo"),
+    y=alt.Y("Créditos recebidos:Q", title="R$"),
+    tooltip=["Ação Governo", "Créditos recebidos", "Crédito disponível", "Empenhadas a liquidar", "Liquidadas a pagar", "Pagas"]
+).properties(height=340)
+
+st.altair_chart(chart1, use_container_width=True)
+
+# Gráfico 2: Comparação (stack) dos componentes — sem dotação
+stack = acao_sum.melt(
+    id_vars=["Ação Governo"],
+    value_vars=["Crédito disponível", "Empenhadas a liquidar", "Liquidadas a pagar", "Pagas"],
+    var_name="Componente",
+    value_name="Valor"
+)
+
+chart2 = alt.Chart(stack).mark_bar().encode(
+    x=alt.X("Ação Governo:N", sort="-y", title="Ação Governo"),
+    y=alt.Y("Valor:Q", stack=True, title="R$"),
+    color=alt.Color("Componente:N", legend=alt.Legend(title="Componente")),
+    tooltip=["Ação Governo", "Componente", "Valor"]
+).properties(height=380)
+
+st.altair_chart(chart2, use_container_width=True)
+
+# (Opcional) Gráfico 3: Pagas vs Recebidos (% por ação)
+acao_sum["% Pagas/Recebidos"] = np.where(
+    acao_sum["Créditos recebidos"] > 0,
+    (acao_sum["Pagas"] / acao_sum["Créditos recebidos"]) * 100.0,
+    0.0
+)
+
+chart3 = alt.Chart(acao_sum).mark_bar().encode(
+    x=alt.X("Ação Governo:N", sort="-y", title="Ação Governo"),
+    y=alt.Y("% Pagas/Recebidos:Q", title="%"),
+    tooltip=["Ação Governo", "% Pagas/Recebidos", "Pagas", "Créditos recebidos"]
+).properties(height=300)
+
+st.subheader("📊 Percentual — Pagas / Créditos Recebidos (por Ação)")
+st.altair_chart(chart3, use_container_width=True)
+
+# =========================
+# Diagnóstico
+# =========================
+if debug:
+    st.divider()
+    st.subheader("Diagnóstico")
+
+    st.write("UG Executora selecionada:", ug_sel_str)
+    st.write("UGR(s) vinculadas:", ugrs_vinculadas)
+
+    st.write("Linhas pool LOA:", len(df_loa_pool))
+    st.write("Linhas LOA usadas:", len(df_loa))
+    st.write("Linhas UG filtrada:", len(df_ug))
+
+    st.write("Dotação (float):", dotacao_loa)
+    st.write("Créditos recebidos (float):", creditos_recebidos)
+    st.write("Pagas (float):", despesas_pagas)
+    st.write("Saldo (float):", saldo)
