@@ -143,7 +143,7 @@ with st.sidebar:
 
     fonte = st.radio("Escolha a fonte", ["OneDrive (URL)", "Arquivo local (caminho)", "Upload (manual)"], index=0)
 
-    url_default = "https://1drv.ms/x/c/79e2ea2aaf97ea6b/IQDp1qtpsZGETq8oyyOl8lacAYtMfzw3hr9M5F-mEYGVKv4?e=kRjGNt"
+    url_default = "https://1drv.ms/x/c/79e2ea2aaf97ea6b/IQTp1qtpsZGETq8oyyOl8lacAfkwae9A3r1dFHyY76mE-6M"
     url = st.text_input("Link do OneDrive", value=url_default) if fonte == "OneDrive (URL)" else ""
 
     path = st.text_input(
