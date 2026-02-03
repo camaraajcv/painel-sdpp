@@ -21,7 +21,6 @@ def money_brl(x: float) -> str:
     return f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def brl_to_float(series: pd.Series) -> pd.Series:
-    # tolerante: remove R$, espaços, separadores BR, etc.
     s = series.astype(str).str.strip()
     s = s.replace({"": np.nan, "nan": np.nan, "None": np.nan})
     s = s.str.replace("R$", "", regex=False).str.replace("\u00a0", " ", regex=False)
@@ -65,7 +64,7 @@ def carregar_df():
         skipinitialspace=True,
     )
 
-    # ✅ remover apenas as 2 primeiras linhas do DF gerado
+    # remover as 2 primeiras linhas do DF gerado (células mescladas)
     df = df.iloc[2:].reset_index(drop=True)
 
     # limpar colunas vazias/Unnamed
@@ -74,7 +73,7 @@ def carregar_df():
 
     df = normalize_cols(df)
 
-    # ✅ renomear colunas numéricas
+    # renomear colunas numéricas
     df = df.rename(columns={
         "13": "DOTACAO_ATUALIZADA",
         "19": "CREDITO_DISPONIVEL",
@@ -106,19 +105,20 @@ except Exception as e:
 st.success(f"Arquivo carregado: {df.shape[0]} linhas × {df.shape[1]} colunas")
 
 # =========================
-# Colunas (fixas do seu CSV)
+# Colunas principais
 # =========================
 COL_UG_EXEC = find_col(df, "ug executora")
-COL_UGR     = find_col(df, "ug responsável", "ug responsavel", "ugr")  # << UGR (chave da LOA)
-COL_DOT     = find_col(df, "dotacao_atualizada")
-COL_CRED    = find_col(df, "credito_disponivel")
-COL_ALIQ    = find_col(df, "empenhadas_a_liquidar")
-COL_LIQP    = find_col(df, "liquidadas_a_pagar")
-COL_PAGO    = find_col(df, "pagas")
+COL_UGR     = find_col(df, "ug responsável", "ug responsavel", "ugr")
+
+COL_DOT  = find_col(df, "dotacao_atualizada")
+COL_CRED = find_col(df, "credito_disponivel")
+COL_ALIQ = find_col(df, "empenhadas_a_liquidar")
+COL_LIQP = find_col(df, "liquidadas_a_pagar")
+COL_PAGO = find_col(df, "pagas")
 
 missing = [n for n,c in [
     ("UG Executora", COL_UG_EXEC),
-    ("UGR (UG Responsável)", COL_UGR),
+    ("UG Responsável (UGR)", COL_UGR),
     ("DOTACAO_ATUALIZADA", COL_DOT),
     ("CREDITO_DISPONIVEL", COL_CRED),
     ("EMPENHADAS_A_LIQUIDAR", COL_ALIQ),
@@ -131,7 +131,7 @@ if missing:
     st.write("Colunas detectadas:", list(df.columns))
     st.stop()
 
-# Converter valores (moeda)
+# Converter valores (moeda) para números
 for c in [COL_DOT, COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]:
     df[c] = brl_to_float(df[c])
 
@@ -149,20 +149,33 @@ if not ug_sel:
 
 ug_sel_str = str(ug_sel).strip()
 
-# Dados da UG selecionada (para créditos recebidos etc.)
+# Linhas da UG selecionada (para Créditos Recebidos etc.)
 df_ug = df[df[COL_UG_EXEC].astype(str).str.strip() == ug_sel_str].copy()
 
 # =========================
-# REGRA CERTA DA DOTAÇÃO (LOA)
-# pool LOA = UG Exec 120002/121002
-# chave = UGR == UG selecionada
+# NOVA REGRA DA DOTAÇÃO (LOA):
+# - UGRs vinculadas = todas as UGRs que aparecem associadas à UG Executora selecionada
+# - Dotação = soma do pool LOA (UG Exec 120002/121002) para UGR IN UGRs_vinculadas
 # =========================
+ugrs_vinculadas = (
+    df_ug[COL_UGR]
+    .dropna()
+    .astype(str)
+    .str.strip()
+)
+ugrs_vinculadas = [u for u in uগ্রs_vinculadas.unique().tolist() if u != ""]
+
 df_loa_pool = df[df[COL_UG_EXEC].astype(str).str.strip().isin(UGS_LOA)].copy()
-df_loa_ug = df_loa_pool[df_loa_pool[COL_UGR].astype(str).str.strip() == ug_sel_str].copy()
-dotacao_loa = df_loa_ug[COL_DOT].sum(skipna=True)
+
+if uগ্রs_vinculadas:
+    df_loa = df_loa_pool[df_loa_pool[COL_UGR].astype(str).str.strip().isin(ugrs_vinculadas)].copy()
+    dotacao_loa = df_loa[COL_DOT].sum(skipna=True)
+else:
+    df_loa = df_loa_pool.iloc[0:0].copy()
+    dotacao_loa = 0.0
 
 # =========================
-# REGRA CERTA DOS CRÉDITOS RECEBIDOS (UG selecionada)
+# Créditos Recebidos (regra fixa)
 # =========================
 creditos_recebidos = (
     df_ug[COL_CRED].sum(skipna=True)
@@ -177,7 +190,7 @@ saldo = creditos_recebidos - empenhos_pagos
 st.subheader(f"📌 Painel — UG Executora: {ug_sel_str}")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Dotação Atualizada (LOA — pool 120002/121002, por UGR)", money_brl(dotacao_loa))
+c1.metric("Dotação Atualizada (LOA — pool 120002/121002 por UGRs vinculadas)", money_brl(dotacao_loa))
 c2.metric("Créditos Recebidos (CD + ALIQ + LAP + PAGAS)", money_brl(creditos_recebidos))
 c3.metric("Despesas pagas", money_brl(empenhos_pagos))
 c4.metric("Saldo (Recebidos - Pagos)", money_brl(saldo))
@@ -185,28 +198,13 @@ c4.metric("Saldo (Recebidos - Pagos)", money_brl(saldo))
 if debug:
     st.divider()
     st.subheader("Diagnóstico")
-    st.write("Linhas da UG selecionada:", len(df_ug))
-    st.write("Linhas no pool LOA (120002/121002):", len(df_loa_pool))
-    st.write("Linhas do pool LOA filtradas por UGR==UG selecionada:", len(df_loa_ug))
-    st.write("Somatório componentes (UG selecionada):")
-    st.write({
-        "CREDITO_DISPONIVEL": float(df_ug[COL_CRED].sum(skipna=True)),
-        "EMPENHADAS_A_LIQUIDAR": float(df_ug[COL_ALIQ].sum(skipna=True)),
-        "LIQUIDADAS_A_PAGAR": float(df_ug[COL_LIQP].sum(skipna=True)),
-        "PAGAS": float(df_ug[COL_PAGO].sum(skipna=True)),
-    })
-    st.write("Dotação (pool LOA por UGR):", float(dotacao_loa))
-    st.dataframe(df_loa_ug[[COL_UG_EXEC, COL_UGR, COL_DOT]].head(50), use_container_width=True)
+    st.write("UG Executora selecionada:", ug_sel_str)
+    st.write("Qtd UGRs vinculadas:", len(ugrs_vinculadas))
+    st.write("UGRs vinculadas (amostra):", uগ্রs_vinculadas[:20])
+    st.write("Linhas pool LOA:", len(df_loa_pool))
+    st.write("Linhas LOA usadas (pool filtrado por UGR vinculada):", len(df_loa))
+    st.dataframe(df_loa[[COL_UG_EXEC, COL_UGR, COL_DOT]].head(50), use_container_width=True)
 
 st.divider()
 st.subheader("Dados filtrados (UG executora selecionada)")
 st.dataframe(df_ug, use_container_width=True, height=520)
-
-# Se ainda ocorrer LOA < Recebidos, mostre alerta (para facilitar depuração)
-if dotacao_loa < creditos_recebidos:
-    st.warning(
-        "⚠️ Atenção: Dotação (LOA) ficou menor que Créditos Recebidos. "
-        "Isso normalmente indica que a chave UGR não está batendo com a UG selecionada "
-        "(ex.: espaços, zeros à esquerda, ou UGR diferente do que você considera). "
-        "Marque 'Mostrar diagnóstico' para ver as linhas usadas na LOA."
-    )
