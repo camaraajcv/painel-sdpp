@@ -1,4 +1,3 @@
-# app.py
 import io
 import re
 import numpy as np
@@ -6,11 +5,11 @@ import requests
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Painel de Gastos — OneDrive", layout="wide")
+st.set_page_config(page_title="Painel de Gastos (Google Drive)", layout="wide")
 
-# =========================
-# Utils
-# =========================
+GDRIVE_ID = "1s-lIrHxMZMRnCOayQeQ5ML0LpLbVTRNy"
+GDRIVE_URL = f"https://drive.google.com/uc?export=download&id={GDRIVE_ID}"
+
 def money_brl(x: float) -> str:
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return "R$ 0,00"
@@ -38,160 +37,55 @@ def find_col(df: pd.DataFrame, *candidates: str):
                 return real
     return None
 
-# =========================
-# OneDrive download (public only)
-# =========================
-def baixar_onedrive_publico(url: str) -> bytes:
-    """
-    Tenta baixar via link público. Se o OneDrive exigir login/sessão no Cloud, vai dar 403.
-    """
-    session = requests.Session()
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    }
-    r = session.get(url, headers=headers, timeout=240, allow_redirects=True)
+@st.cache_data(ttl=60*30, show_spinner=True)  # 30 min (ajuste como quiser)
+def baixar_drive(url: str) -> bytes:
+    # Google Drive às vezes exige "confirm" (anti-virus). Trata isso.
+    s = requests.Session()
+    r = s.get(url, timeout=120, allow_redirects=True)
     r.raise_for_status()
 
-    # tenta extrair downloadUrl do HTML (quando disponível)
-    m = re.search(r'"downloadUrl":"(https:[^"]+)"', r.text)
-    if not m:
-        raise RuntimeError(
-            "Não consegui extrair downloadUrl do OneDrive. "
-            "Mesmo com link 'qualquer pessoa', alguns links exigem autenticação e dão 403 no Streamlit Cloud."
-        )
+    # Se vier HTML pedindo confirmação, pega o token e baixa de novo
+    if "text/html" in r.headers.get("Content-Type", "") and "confirm=" in r.text:
+        import re as _re
+        m = _re.search(r'confirm=([0-9A-Za-z_]+)', r.text)
+        if m:
+            confirm = m.group(1)
+            r = s.get(url + f"&confirm={confirm}", timeout=120, allow_redirects=True)
+            r.raise_for_status()
 
-    download_url = m.group(1).encode("utf-8").decode("unicode_escape")
-    f = session.get(download_url, headers=headers, timeout=240, allow_redirects=True)
-    f.raise_for_status()
-    return f.content
-
-# =========================
-# Read Excel/CSV with your rules
-# =========================
-def preprocess_csv_text(csv_text: str) -> str:
-    lines = csv_text.splitlines()
-    if len(lines) < 4:
-        raise ValueError("CSV muito curto — não dá pra remover 1ª e 2 últimas linhas com segurança.")
-    kept = lines[1:-2]  # remove 1ª e 2 últimas
-    if not kept:
-        raise ValueError("Após remover linhas, não sobrou conteúdo no CSV.")
-    return "\n".join(kept)
-
-def bytes_to_text(data: bytes) -> str:
-    for enc in ("utf-8-sig", "utf-8", "latin1", "cp1252"):
-        try:
-            return data.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    return data.decode("utf-8", errors="replace")
+    return r.content
 
 def ler_excel_tratado(data: bytes) -> pd.DataFrame:
-    # regra: remove 1ª linha; 2ª vira cabeçalho; remove 2 últimas linhas
+    # regra: remover 1ª linha; 2ª vira cabeçalho; remover 2 últimas linhas
     df = pd.read_excel(io.BytesIO(data), skiprows=1, dtype=str)
     if len(df) >= 2:
         df = df.iloc[:-2].copy()
     return df
 
-def read_table_from_bytes(data: bytes) -> pd.DataFrame:
-    # tenta detectar CSV rápido
-    text = bytes_to_text(data)
-    looks_like_csv = any(sep in text[:5000] for sep in [",", ";", "\t"])
+st.title("📊 Painel de Gastos — Google Drive (atualização automática)")
 
-    if looks_like_csv:
-        treated = preprocess_csv_text(text)
-        for sep in (";", ",", "\t"):
-            try:
-                df = pd.read_csv(io.StringIO(treated), sep=sep, header=0, dtype=str)
-                if df.shape[1] == 1 and sep != "\t":
-                    continue
-                return df
-            except Exception:
-                continue
-        raise ValueError("Não consegui ler o CSV (separador/estrutura).")
+if st.button("🔄 Atualizar agora"):
+    st.cache_data.clear()
 
-    # caso contrário, Excel
-    return ler_excel_tratado(data)
-
-# =========================
-# UI
-# =========================
-st.title("📊 Painel de Gastos — Leitura diária (Streamlit Cloud)")
-
-with st.sidebar:
-    st.header("Fonte de dados")
-    fonte = st.radio("Escolha a fonte", ["OneDrive (URL)", "Upload (manual)", "Arquivo local (dev)"], index=0)
-
-    url_default = "https://1drv.ms/x/c/79e2ea2aaf97ea6b/IQTp1qtpsZGETq8oyyOl8lacAfkwae9A3r1dFHyY76mE-6M&download=1"
-    url = st.text_input("Link do OneDrive", value=url_default) if fonte == "OneDrive (URL)" else ""
-
-    uploaded = st.file_uploader("Envie o arquivo", type=["csv", "xlsx", "xls"]) if fonte == "Upload (manual)" else None
-
-    path = st.text_input(
-        "Caminho local (somente se rodar localmente)",
-        value="",
-    ) if fonte == "Arquivo local (dev)" else ""
-
-    btn_carregar = st.button("🔄 Carregar agora", use_container_width=True)
-    mostrar_diag = st.checkbox("Mostrar diagnóstico", value=False)
-
-st.caption("Regras: remover 1ª linha e as 2 últimas; a 2ª linha vira cabeçalho (para Excel: skiprows=1 e depois corta 2 últimas).")
-
-df = None
-
-if btn_carregar:
-    try:
-        if fonte == "OneDrive (URL)":
-            if not url.strip():
-                raise ValueError("Informe a URL do OneDrive.")
-            data = baixar_onedrive_publico(url)
-            df = read_table_from_bytes(data)
-
-        elif fonte == "Upload (manual)":
-            if uploaded is None:
-                raise ValueError("Envie um arquivo para continuar.")
-            df = read_table_from_bytes(uploaded.getvalue())
-
-        else:  # Arquivo local (dev)
-            if not path.strip():
-                raise ValueError("Informe o caminho do arquivo.")
-            with open(path, "rb") as f:
-                data = f.read()
-            df = read_table_from_bytes(data)
-
-        df = normalize_cols(df)
-
-    except requests.HTTPError as e:
-        st.error(f"Erro HTTP ao acessar OneDrive: {e}\n\n"
-                 f"➡️ Se for 403 no Streamlit Cloud, o link ainda exige autenticação. "
-                 f"Nesse caso, só resolve com Microsoft Graph (OAuth) ou hospedando o arquivo em um link realmente público.")
-        st.stop()
-    except Exception as e:
-        st.error(f"Erro ao carregar/ler o arquivo: {e}")
-        st.stop()
-
-if df is None:
-    st.info("Clique em **Carregar agora** para buscar o arquivo e montar o painel.")
+try:
+    data = baixar_drive(GDRIVE_URL)
+    df = ler_excel_tratado(data)
+    df = normalize_cols(df)
+except Exception as e:
+    st.error(f"Erro ao baixar/ler do Google Drive: {e}")
     st.stop()
 
 st.success(f"Arquivo carregado: {df.shape[0]} linhas × {df.shape[1]} colunas")
 
-if mostrar_diag:
-    st.write("Colunas encontradas:", list(df.columns))
-    st.dataframe(df.head(20), use_container_width=True)
-
-# =========================
-# Painel por UG
-# =========================
+# ===== Painel por UG =====
 COL_UG   = find_col(df, "ug executora", "ug execut", "ug", "unidade gestora")
 COL_DOT  = find_col(df, "dotacao atualizada", "dotação atualizada", "dotacao", "dotação")
-
 COL_CRED = find_col(df, "credito disponivel", "crédito disponível", "credito disponível")
 COL_ALIQ = find_col(df, "empenhos a liquidar", "a liquidar")
 COL_LIQP = find_col(df, "empenhos liquidados a pagar", "liquidados a pagar")
 COL_PAGO = find_col(df, "empenhos pagos", "pagos")
 
-missing = [n for n, c in [
+missing = [n for n,c in [
     ("UG Executora", COL_UG),
     ("Dotação atualizada", COL_DOT),
     ("Crédito disponível", COL_CRED),
@@ -202,13 +96,12 @@ missing = [n for n, c in [
 
 if missing:
     st.error("Não encontrei estas colunas no arquivo: " + ", ".join(missing))
+    st.write("Colunas detectadas:", list(df.columns))
     st.stop()
 
-# converte moeda
 for c in [COL_DOT, COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]:
     df[c] = brl_to_float(df[c])
 
-# seletor obrigatório de UG
 with st.sidebar:
     st.header("Filtro obrigatório")
     ugs = sorted(df[COL_UG].dropna().astype(str).unique().tolist())
@@ -240,13 +133,12 @@ c4.metric("Saldo (Recebidos - Pagos)", money_brl(saldo))
 
 st.divider()
 
-# resumo por ND/GND/Elemento (se existir)
+# Resumo por ND/GND/Elemento (se existir)
 COL_ND   = find_col(df_ug, "nd", "natureza da despesa", "natureza despesa")
 COL_GND  = find_col(df_ug, "gnd", "grupo natureza")
 COL_ELEM = find_col(df_ug, "elemento", "elemento despesa")
 
 group_cols = [c for c in [COL_ND, COL_GND, COL_ELEM] if c is not None]
-
 if group_cols:
     resumo = (
         df_ug.groupby(group_cols, dropna=False)[[COL_DOT, COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]]
@@ -254,8 +146,8 @@ if group_cols:
         .reset_index()
     )
     resumo["Créditos recebidos"] = resumo[COL_CRED] + resumo[COL_ALIQ] + resumo[COL_LIQP] + resumo[COL_PAGO]
-    st.subheader("Resumo por classificação (ND/GND/Elemento)")
+    st.subheader("Resumo por classificação")
     st.dataframe(resumo, use_container_width=True, height=520)
 else:
-    st.subheader("Dados filtrados da UG (sem colunas ND/GND/Elemento detectadas)")
+    st.subheader("Dados filtrados da UG")
     st.dataframe(df_ug, use_container_width=True, height=520)
