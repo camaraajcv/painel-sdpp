@@ -126,7 +126,7 @@ def ler_excel_tratado(data: bytes) -> pd.DataFrame:
 # UI
 # =========================
 st.title("📊 Painel de Gastos — Leitura diária do OneDrive")
-url = "https://1drv.ms/x/c/79e2ea2aaf97ea6b/IQDp1qtpsZGETq8oyyOl8lacAYtMfzw3hr9M5F-mEYGVKv4t"
+url = "https://1drv.ms/x/c/79e2ea2aaf97ea6b/IQTp1qtpsZGETq8oyyOl8lacAfkwae9A3r1dFHyY76mE-6M"
 
 try:
     data = baixar_onedrive(url)
