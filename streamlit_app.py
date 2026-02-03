@@ -293,23 +293,3 @@ for c in ["DOTACAO_ATUALIZADA", "CREDITO_DISPONIVEL", "EMPENHADAS_A_LIQUIDAR", "
 
 st.dataframe(tab_show, use_container_width=True, height=560)
 
-# =========================
-# Diagnóstico opcional
-# =========================
-# =========================
-# Diagnóstico opcional
-# =========================
-if debug:
-    st.divider()
-    st.subheader("Diagnóstico")
-
-    st.write("UG Executora selecionada:", ug_sel_str)
-    st.write("UGR(s) vinculadas:", ugrs_vinculadas)
-
-    st.write("Linhas pool LOA:", len(df_loa_pool))
-    st.write("Linhas LOA usadas (após filtro por UGR):", len(df_loa))
-    st.write("Linhas UG filtrada:", len(df_ug))
-
-    st.write("KPI Dotação (float):", dotacao_loa)
-    st.write("KPI Créditos Recebidos (float):", creditos_recebidos)
-
