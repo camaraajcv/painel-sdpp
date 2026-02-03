@@ -122,7 +122,7 @@ with st.sidebar:
     st.header("Fonte de dados")
     fonte = st.radio("Escolha a fonte", ["OneDrive (URL)", "Upload (manual)", "Arquivo local (dev)"], index=0)
 
-    url_default = "https://1drv.ms/x/c/79e2ea2aaf97ea6b/IQDp1qtpsZGETq8oyyOl8lacAYtMfzw3hr9M5F-mEYGVKv4?e=jICJ9i"
+    url_default = "https://1drv.ms/x/c/79e2ea2aaf97ea6b/IQTp1qtpsZGETq8oyyOl8lacAfkwae9A3r1dFHyY76mE-6M&download=1"
     url = st.text_input("Link do OneDrive", value=url_default) if fonte == "OneDrive (URL)" else ""
 
     uploaded = st.file_uploader("Envie o arquivo", type=["csv", "xlsx", "xls"]) if fonte == "Upload (manual)" else None
