@@ -84,14 +84,32 @@ def read_table_from_bytes(data: bytes, source_name: str = "arquivo") -> pd.DataF
         raise ValueError(f"Não consegui interpretar {source_name} como CSV nem como Excel. Detalhe: {e}")
 
 
-def download_onedrive_file(url: str) -> bytes:
-    dl = make_download_url(url)
+def baixar_onedrive_publico(url: str) -> bytes:
+    s = requests.Session()
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        "Referer": "https://onedrive.live.com/",
     }
-    r = requests.get(dl, headers=headers, timeout=240, allow_redirects=True)
+
+    # 1) abre a página do compartilhamento
+    r = s.get(url, headers=headers, timeout=240, allow_redirects=True)
     r.raise_for_status()
+
+    html = r.text
+
+    # 2) tenta achar uma URL de download dentro do HTML (varia, mas esse padrão pega muitos casos)
+    m = re.search(r'"downloadUrl":"(https:[^"]+)"', html)
+    if not m:
+        raise RuntimeError("Não encontrei downloadUrl na página. Gere um link 'Qualquer pessoa' ou use Graph API.")
+
+    download_url = m.group(1).encode("utf-8").decode("unicode_escape")
+
+    # 3) baixa o arquivo real
+    f = s.get(download_url, headers=headers, timeout=240)
+    f.raise_for_status()
+    return f.content
     return r.content
 
 
@@ -182,3 +200,107 @@ if df is not None:
     st.info("Agora me passe a **regra do painel de gastos** (quais colunas usar, filtros, agregações e KPIs) que eu já encaixo aqui.")
 else:
     st.warning("Clique em **Carregar agora** para buscar o arquivo e montar o DataFrame.")
+    import numpy as np
+
+def find_col(df: pd.DataFrame, *candidates: str):
+    cols_norm = {c: re.sub(r"\s+", " ", str(c)).strip().lower() for c in df.columns}
+    for cand in candidates:
+        cand = cand.lower().strip()
+        # match por "contém"
+        for real, norm in cols_norm.items():
+            if cand in norm:
+                return real
+    return None
+
+def brl_to_float(series: pd.Series) -> pd.Series:
+    s = series.astype(str).str.strip()
+    s = s.replace({"": np.nan, "nan": np.nan, "None": np.nan})
+    # remove "R$" e espaços
+    s = s.str.replace("R$", "", regex=False).str.replace("\u00a0", " ", regex=False).str.replace(" ", "", regex=False)
+    # troca separadores BR -> padrão
+    s = s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+    return pd.to_numeric(s, errors="coerce")
+
+# =========================
+# Após df carregado e df.columns normalizado
+# =========================
+COL_UG = find_col(df, "ug executora", "ug", "unidade gestora")
+COL_DOT = find_col(df, "dotacao atualizada", "dotação atualizada", "dotacao", "dotação")
+
+COL_CRED = find_col(df, "credito disponivel", "crédito disponível", "credito disponível")
+COL_ALIQ = find_col(df, "empenhos a liquidar", "a liquidar")
+COL_LIQP = find_col(df, "empenhos liquidados a pagar", "liquidados a pagar")
+COL_PAGO = find_col(df, "empenhos pagos", "pagos")
+
+missing = [n for n,c in [
+    ("UG Executora", COL_UG),
+    ("Dotação atualizada", COL_DOT),
+    ("Crédito disponível", COL_CRED),
+    ("Empenhos a liquidar", COL_ALIQ),
+    ("Empenhos liquidados a pagar", COL_LIQP),
+    ("Empenhos pagos", COL_PAGO),
+] if c is None]
+
+if missing:
+    st.error("Não encontrei estas colunas no arquivo: " + ", ".join(missing))
+    st.stop()
+
+# converter moeda
+for c in [COL_DOT, COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]:
+    df[c] = brl_to_float(df[c])
+
+# Sidebar: UG obrigatória
+with st.sidebar:
+    st.header("Filtro obrigatório")
+    ugs = sorted(df[COL_UG].dropna().astype(str).unique().tolist())
+    ug_sel = st.selectbox("UG Executora", options=ugs, index=None, placeholder="Selecione a UG...")
+
+if not ug_sel:
+    st.info("Selecione uma **UG Executora** para gerar o painel.")
+    st.stop()
+
+df_ug = df[df[COL_UG].astype(str) == str(ug_sel)].copy()
+
+# métricas principais
+dotacao_loa = df_ug[COL_DOT].sum(skipna=True)
+creditos_recebidos = (
+    df_ug[COL_CRED].sum(skipna=True)
+    + df_ug[COL_ALIQ].sum(skipna=True)
+    + df_ug[COL_LIQP].sum(skipna=True)
+    + df_ug[COL_PAGO].sum(skipna=True)
+)
+
+# (opcional) execução: quanto já virou pagamento
+empenhos_pagos = df_ug[COL_PAGO].sum(skipna=True)
+
+st.subheader(f"📌 Painel — UG Executora: {ug_sel}")
+
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Dotação Atualizada (LOA)", f"R$ {dotacao_loa:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+c2.metric("Créditos Recebidos (soma)", f"R$ {creditos_recebidos:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+c3.metric("Empenhos pagos", f"R$ {empenhos_pagos:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+# saldo simples (se fizer sentido pra você)
+saldo = creditos_recebidos - empenhos_pagos
+c4.metric("Saldo (Recebidos - Pagos)", f"R$ {saldo:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+
+st.divider()
+
+# Resumo por alguma dimensão (se existir)
+COL_ND  = find_col(df_ug, "nd", "natureza da despesa", "natureza despesa")
+COL_GND = find_col(df_ug, "gnd", "grupo natureza")
+COL_ELEM = find_col(df_ug, "elemento", "elemento despesa")
+
+group_cols = [c for c in [COL_ND, COL_GND, COL_ELEM] if c is not None]
+if group_cols:
+    resumo = (
+        df_ug.groupby(group_cols, dropna=False)[[COL_DOT, COL_CRED, COL_ALIQ, COL_LIQP, COL_PAGO]]
+        .sum()
+        .reset_index()
+    )
+    resumo["Créditos recebidos"] = resumo[COL_CRED] + resumo[COL_ALIQ] + resumo[COL_LIQP] + resumo[COL_PAGO]
+    st.subheader("Resumo por classificação")
+    st.dataframe(resumo, use_container_width=True, height=520)
+else:
+    st.subheader("Dados filtrados da UG")
+    st.dataframe(df_ug, use_container_width=True, height=520)
+
